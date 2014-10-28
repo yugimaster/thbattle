@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 from game_common import GameError, GameEnded, sync_primitive, InterruptActionFlow, GameException, GameObject, Action, EventHandler, InputTransaction, Game  # noqa
 from gevent import Greenlet
 
