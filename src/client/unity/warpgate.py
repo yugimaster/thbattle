@@ -4,6 +4,8 @@ import sys
 reload(sys)
 sys.setdefaultencoding(sys.getfilesystemencoding())
 
+import gevent
+
 from utils.misc import instantiate
 
 '''
@@ -16,17 +18,26 @@ Emits:
 
 class ExecutiveWrapper(object):
     def __init__(self, executive, warpgate):
-        self.executive = executive
-        self.warpgate = warpgate
+        object.__setattr__(self, "executive", executive)
+        object.__setattr__(self, "warpgate", warpgate)
 
     def __getattr__(self, k):
         return getattr(self.executive, k)
 
     def __setattr__(self, k, v):
-        setattr(self.executive, k)
+        setattr(self.executive, k, v)
 
     def connect_server(self, addr):
         self.executive.connect_server(addr, self.warpgate.queue_system_event)
+
+    def start_replay(self, rep):
+        self.executive.start_replay(rep, self.warpgate.queue_system_event)
+
+    def update(self):
+        def update_cb(name, p):
+            self.warpgate.queue_system_event('update', name, p)
+
+        self.executive.update(update_cb)
 
 
 @instantiate
@@ -53,7 +64,6 @@ class Warpgate(object):
             autoupdate.Autoupdate = autoupdate.DummyAutoupdate
 
         L("before gevent")
-        import gevent
         from gevent import monkey
         monkey.patch_socket()
         monkey.patch_os()
@@ -89,7 +99,14 @@ class Warpgate(object):
         self.bds.close()
 
     def shutdown(self):
-        pass
+        from client.core.executive import Executive
+        if Executive.state == 'connected':
+            try:
+                Executive.server.sock.close()
+            except:
+                from UnityEngine import Debug
+                import traceback
+                Debug.Log(traceback.format_exc())
 
     def queue_system_event(self, evt_name, *args):
         self.events.append(('system_event', evt_name, args))
