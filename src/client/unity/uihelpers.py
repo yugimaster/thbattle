@@ -17,9 +17,9 @@ class UnityUIEventHook(EventHandler):
     def evt_user_input(self, evt, arg):
         trans, ilet = arg
         evt = Event()
-        self.warpgate.events.append(('user_input', trans, ilet, evt.set))
+        self.warpgate.events.append(('user_input', (trans, ilet, evt.set)))
         evt.wait()
         return ilet
 
     def handle(self, evt, data):
-        self.warpgate.events.append(('game_event', evt, data))
+        self.warpgate.events.append(('game_event', (evt, data)))

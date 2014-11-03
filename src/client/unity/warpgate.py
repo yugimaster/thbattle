@@ -4,16 +4,53 @@ import sys
 reload(sys)
 sys.setdefaultencoding(sys.getfilesystemencoding())
 
+import traceback
+
 import gevent
+import gevent.hub
 
 from utils.misc import instantiate
 
 '''
 Emits:
-    ['user_input', trans -> InputTransaction, ilet -> Inputlet, complete -> function]
-    ['game_event', evt_name -> str, arg -> object]  // Game.emit_event
+    ['user_input', g -> Game, trans -> InputTransaction, ilet -> Inputlet, complete -> function]
+    ['game_event', g -> Game, evt_name -> str, arg -> object]  // Game.emit_event
     ['system_event', evt_name -> str, args -> tuple]  // See Executive
 '''
+
+
+@gevent.hub.set_hub
+@instantiate
+class UnityHub(gevent.hub.Hub):
+
+    def print_exception(self, context, type, value, tb):
+        text = ''.join(traceback.format_exception(type, value, tb))
+        del tb
+        if context is not None:
+            if not isinstance(context, str):
+                try:
+                    context = self.format_context(context)
+                except:
+                    text += 'Error formatting context\n' + traceback.format_exc()
+                    context = repr(context)
+            text += ('\n%s failed with %s\n\n' % (context, getattr(type, '__name__', 'exception'), ))
+
+        try:
+            from UnityEngine import Debug
+            Debug.LogError(text)
+        except:
+            # fuck
+            pass
+
+
+class UnityLogStream(object):
+    def write(self, data):
+        from UnityEngine import Debug
+        Debug.Log(data)
+
+import logging
+logging.basicConfig(stream=UnityLogStream())
+logging.getLogger().setLevel(logging.ERROR)
 
 
 class ExecutiveWrapper(object):
@@ -27,17 +64,27 @@ class ExecutiveWrapper(object):
     def __setattr__(self, k, v):
         setattr(self.executive, k, v)
 
-    def connect_server(self, addr):
-        self.executive.connect_server(addr, self.warpgate.queue_system_event)
+    def connect_server(self, host, port):
+        from UnityEngine import Debug
+        Debug.Log(repr((host, port)))
+
+        @gevent.spawn
+        def do():
+            Q = self.warpgate.queue_system_event
+            Q('connect', self.executive.connect_server((host, port), Q))
 
     def start_replay(self, rep):
         self.executive.start_replay(rep, self.warpgate.queue_system_event)
 
     def update(self):
-        def update_cb(name, p):
-            self.warpgate.queue_system_event('update', name, p)
+        Q = self.warpgate.queue_system_event
 
-        self.executive.update(update_cb)
+        def update_cb(name, p):
+            Q('update', name, p)
+
+        @gevent.spawn
+        def do():
+            Q('result', self.executive.update(update_cb))
 
 
 @instantiate
@@ -78,7 +125,7 @@ class Warpgate(object):
         def beat():
             while True:
                 gevent.sleep(1)
-                self.events.append(("tick",))
+                # self.events.append(("tick",))
 
         from client.core.executive import Executive
         self.executive = ExecutiveWrapper(Executive, self)
@@ -101,12 +148,7 @@ class Warpgate(object):
     def shutdown(self):
         from client.core.executive import Executive
         if Executive.state == 'connected':
-            try:
-                Executive.server.sock.close()
-            except:
-                from UnityEngine import Debug
-                import traceback
-                Debug.Log(traceback.format_exc())
+            Executive.disconnect()
 
     def queue_system_event(self, evt_name, *args):
         self.events.append(('system_event', evt_name, args))
